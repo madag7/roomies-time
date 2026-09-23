@@ -7,3 +7,173 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum MemberRole {
+  ADMIN
+  MEMBER
+}
+
+enum MemberStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
+}
+
+enum SpaceType {
+  KITCHEN
+  BATHROOM
+  LAUNDRY
+  LIVING_ROOM
+  TERRACE
+  PARKING
+  OTHER
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+// ---------------------------------------------------------------------------
+// Modelos
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid())
+  firstName    String
+  lastName     String
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  createdApartments      Apartment[]             @relation("ApartmentCreator")
+  memberships            ApartmentMember[]
+  reservations           Reservation[]           @relation("ReservationCreator")
+  reservationsReceived   Reservation[]           @relation("ReservationBeneficiary")
+  notifications          Notification[]
+  passwordRecoveryTokens PasswordRecoveryToken[]
+
+  @@map("users")
+}
+
+model Apartment {
+  id              String   @id @default(uuid())
+  name            String
+  invitationCode  String   @unique
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  createdBy User              @relation("ApartmentCreator", fields: [createdByUserId], references: [id])
+  members   ApartmentMember[]
+  spaces    Space[]
+
+  @@index([createdByUserId])
+  @@map("apartments")
+}
+
+/// Relación N:M entre User y Apartment, con datos propios (rol y estado).
+model ApartmentMember {
+  id          String       @id @default(uuid())
+  userId      String
+  apartmentId String
+  role        MemberRole   @default(MEMBER)
+  status      MemberStatus @default(PENDING)
+  joinedAt    DateTime     @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  apartment Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, apartmentId])
+  @@index([apartmentId])
+  @@index([userId])
+  @@map("apartment_members")
+}
+
+model Space {
+  id                     String    @id @default(uuid())
+  name                   String
+  type                   SpaceType @default(OTHER)
+  description            String?
+  /// Duración máxima de una reserva, en minutos.
+  maxReservationDuration Int?
+  allowsSharing          Boolean   @default(false)
+  /// Inicio del horario de descanso (no reservable).
+  restTimeStart          DateTime? @db.Time(0)
+  /// Fin del horario de descanso (no reservable).
+  restTimeEnd            DateTime? @db.Time(0)
+  calendarColor          String?
+  apartmentId            String
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  apartment    Apartment     @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+  reservations Reservation[]
+
+  @@index([apartmentId])
+  @@map("spaces")
+}
+
+model Reservation {
+  id                String            @id @default(uuid())
+  date              DateTime          @db.Date
+  startTime         DateTime          @db.Time(0)
+  endTime           DateTime          @db.Time(0)
+  isShared          Boolean           @default(false)
+  notes             String?
+  /// Usuario que creó la reserva.
+  userId            String
+  /// Usuario para el que se hizo la reserva (puede ser otro miembro).
+  reservedForUserId String
+  spaceId           String
+  status            ReservationStatus @default(CONFIRMED)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  user          User           @relation("ReservationCreator", fields: [userId], references: [id])
+  reservedFor   User           @relation("ReservationBeneficiary", fields: [reservedForUserId], references: [id])
+  space         Space          @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  notifications Notification[]
+
+  @@index([spaceId, date])
+  @@index([userId])
+  @@index([reservedForUserId])
+  @@map("reservations")
+}
+
+model Notification {
+  id            String   @id @default(uuid())
+  title         String
+  message       String
+  read          Boolean  @default(false)
+  userId        String
+  reservationId String?
+  createdAt     DateTime @default(now())
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reservation Reservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, read])
+  @@index([reservationId])
+  @@map("notifications")
+}
+
+model PasswordRecoveryToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_recovery_tokens")
+}
